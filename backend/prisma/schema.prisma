@@ -1,0 +1,97 @@
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["postgresqlExtensions"]
+}
+
+datasource db {
+  provider   = "postgresql"
+  url        = env("DATABASE_URL")
+  extensions = [postgis]
+}
+
+model Site {
+  id        String   @id @default(uuid())
+  name      String
+  province  String?
+  latitude  Float?
+  longitude Float?
+  farmId    String   @map("farm_id")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+  plots     Plot[]
+
+  @@map("sites")
+}
+
+model Plot {
+  id               String                                  @id @default(uuid())
+  farmId           String                                  @map("farm_id")
+  plotName         String                                  @map("plot_name")
+  geometry         Unsupported("geometry(Polygon, 4326)")?
+  areaHa           Float?                                  @map("area_ha")
+  areaRai          Float?                                  @map("area_rai")
+  plotType         String                                  @map("plot_type")
+  irrigationSource String?                                 @map("irrigation_source")
+  landLeveling     String?                                 @map("land_leveling")
+  siteId           String?                                 @map("site_id")
+  polyid           String?                                 @map("polyid")
+  site             Site?                                   @relation(fields: [siteId], references: [id])
+  carbonRecords    CarbonRecord[]
+  ndviHistory      PlotNdviHistory[]
+  createdAt        DateTime                                @default(now()) @map("created_at")
+  updatedAt        DateTime                                @updatedAt @map("updated_at")
+
+  @@map("plots")
+}
+
+model CarbonRecord {
+  id              String   @id @default(uuid())
+  plotId          String   @map("plot_id")
+  plot            Plot     @relation(fields: [plotId], references: [id])
+  startDate       DateTime @map("start_date")
+  harvestDate     DateTime @map("harvest_date")
+  totalDays       Int      @map("total_days")
+  carbonCreditTon Float    @map("carbon_credit_ton")
+  revenueThb      Float    @map("revenue_thb")
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  @@map("carbon_records")
+}
+
+enum LayerType {
+  RGB
+  NDVI
+}
+
+model MapTileRecord {
+  id         String    @id @default(uuid())
+  farmId     String    @map("farm_id")
+  date       DateTime
+  layerType  LayerType @map("layer_type")
+  minZoom    Int       @default(10) @map("min_zoom")
+  maxZoom    Int       @default(18) @map("max_zoom")
+  baseUrl    String    @map("base_url")
+  cloudCover Float?    @map("cloud_cover")
+  createdAt  DateTime  @default(now()) @map("created_at")
+  updatedAt  DateTime  @updatedAt @map("updated_at")
+
+  @@unique([farmId, date, layerType])
+  @@index([farmId, date])
+  @@map("map_tile_records")
+}
+
+model PlotNdviHistory {
+  id         String   @id @default(uuid())
+  plotId     String   @map("plot_id")
+  plot       Plot     @relation(fields: [plotId], references: [id], onDelete: Cascade)
+  date       DateTime
+  mean       Float
+  max        Float
+  min        Float
+  cloudCover Float?   @map("cloud_cover")
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  @@unique([plotId, date])
+  @@index([plotId, date])
+  @@map("plot_ndvi_history")
+}
