@@ -4,6 +4,13 @@
 
 ---
 
+## 💻 Tech Stacks
+- **Backend:** NestJS, Prisma, PostgreSQL
+- **Data Pipeline:** Python, Docker, GDAL
+- **Mobile App:** Flutter (Dart)
+
+---
+
 ## 🛠️ โครงสร้างของโปรเจกต์
 
 - `backend/` - เซิร์ฟเวอร์ API และการจัดการฐานข้อมูล (NestJS + Prisma + PostgreSQL)
