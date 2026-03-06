@@ -21,10 +21,12 @@
    cd backend
    npm install
    ```
-2. แก้ไขรหัสผ่าน Database: เปลี่ยนข้อมูลในไฟล์ `backend/.env` ให้ตรงกับ PostgreSQL ของคุณ
-   ```env
-   DATABASE_URL="postgresql://[USER]:[PASSWORD]@localhost:5432/web_demo?schema=public"
+2. ตั้งค่าไฟล์ Environment:
+   คัดลอกไฟล์ตัวอย่างและใส่ค่าที่ต้องการ (เช่น Database URL, API Keys)
+   ```bash
+   cp .env.example .env
    ```
+   _หมายเหตุ: หากใช้ Docker สำหรับฐานข้อมูล สามารถใช้ค่าเริ่มต้นในไฟล์ตัวอย่างได้เลย_
 3. รัน Migration และ Generate Database:
    ```bash
    npx prisma generate
