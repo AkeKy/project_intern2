@@ -34,7 +34,11 @@
    cp .env.example .env
    ```
    _หมายเหตุ: หากใช้ Docker สำหรับฐานข้อมูล สามารถใช้ค่าเริ่มต้นในไฟล์ตัวอย่างได้เลย_
-3. รัน Migration และ Generate Database:
+3. รัน Database ด้วย Docker:
+   ```bash
+   docker-compose up -d
+   ```
+4. รัน Migration และ Generate Database:
    ```bash
    npx prisma generate
    npx prisma migrate dev
