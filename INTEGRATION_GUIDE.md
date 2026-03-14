@@ -1,13 +1,13 @@
 # Sentinel-2 Map Tile Server Integration Guide
 
-This document outlines the architecture and integration process for the Sentinel-2 Map Tile Server module, designed to provide high-resolution (S2DR) NDVI and RGB map tiles to the main application.
+This document outlines the architecture and integration process for the Sentinel-2 Map Tile Server module, designed to provide NDVI and RGB map tiles to the main application.
 
 ## 🏗️ Architecture Overview
 
 The system consists of three main decoupled components:
 
 1.  **Data Processing Pipeline (`data-pipeline/`)**
-    - **Role:** Takes raw `.tif` files (e.g., from Google Earth Engine or Colab S2DR4 models) and processes them into XYZ Map Tiles (`.png`).
+    - **Role:** Takes raw `.tif` files (e.g., from Google Earth Engine) and processes them into XYZ Map Tiles (`.png`).
     - **Tech Stack:** Python 3, GDAL (via Docker `ghcr.io/osgeo/gdal`).
     - **Integration Point:** Submits HTTP `POST` requests to the Backend API to register the generated tiles.
 
@@ -69,7 +69,7 @@ The data pipeline can run anywhere (a cron job server, a cloud function, or the 
 
     ```bash
     python generate_tiles.py \
-      --tif /path/to/S2DR4_NDVI.tif \
+      --tif /path/to/NDVI.tif \
       --farm-id "FARM_001" \
       --date "2026-03-02" \
       --layer-type "NDVI" \
