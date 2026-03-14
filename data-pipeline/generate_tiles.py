@@ -80,6 +80,8 @@ def main():
         print(f"Error registering to backend: {e}")
         if response is not None:
             print(f"Server response: {response.text}")
+        else:
+            print("No response from server (is the backend running?)")
         sys.exit(1)
 
 if __name__ == "__main__":
