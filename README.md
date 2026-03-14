@@ -58,7 +58,12 @@
    ```bash
    cd data-pipeline
    python3 -m venv venv
+   # สำหรับ Linux/macOS
    source venv/bin/activate
+   
+   # สำหรับ Windows (PowerShell)
+   .\venv\Scripts\Activate.ps1
+   
    pip install requests
    ```
 2. ทดสอบนำเข้าแผนที่ตัวอย่าง (สมมติว่าคุณมีไฟล์ `your_map.tif` อยู่):

@@ -70,6 +70,7 @@ def main():
         "baseUrl": base_url,
     }
 
+    response = None
     try:
         print(f"Registering tile to API: {api_endpoint}")
         response = requests.post(api_endpoint, json=payload)
