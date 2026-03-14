@@ -26,7 +26,7 @@
 1. ติดตั้งไลบรารี:
    ```bash
    cd backend
-   npm install
+   npm install / npm ci
    ```
 2. ตั้งค่าไฟล์ Environment:
    คัดลอกไฟล์ตัวอย่างและใส่ค่าที่ต้องการ (เช่น Database URL, API Keys)
