@@ -10,7 +10,7 @@ def main():
     parser.add_argument("--farm-id", required=True, help="Farm ID")
     parser.add_argument("--date", required=True, help="Date in YYYY-MM-DD format")
     parser.add_argument("--layer-type", required=True, choices=["RGB", "NDVI"], help="Layer type")
-    parser.add_argument("--api-url", default="http://localhost:3000", help="Base URL of backend API")
+    parser.add_argument("--api-url", default="http://127.0.0.1:3000", help="Base URL of backend API")
     parser.add_argument("--public-dir", default="../backend/public", help="Path to backend public directory")
     
     args = parser.parse_args()
