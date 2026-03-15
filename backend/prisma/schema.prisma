@@ -17,9 +17,9 @@ datasource db {
 model Site {
   id        String   @id @default(uuid())
   name      String
-  province  String?
-  latitude  Float?
-  longitude Float?
+  province  String
+  latitude  Float
+  longitude Float
   farmId    String   @map("farm_id")
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
@@ -29,18 +29,16 @@ model Site {
 }
 
 model Plot {
-  id               String                                  @id @default(uuid())
+  id               String                                  @id @default(uuid()) @map("id")
   farmId           String                                  @map("farm_id")
   plotName         String                                  @map("plot_name")
-  geometry         Unsupported("geometry(Polygon, 4326)")?
-  areaHa           Float?                                  @map("area_ha")
-  areaRai          Float?                                  @map("area_rai")
+  geometry         Unsupported("geometry(Polygon, 4326)")
+  areaHa           Float                                   @map("area_ha")
+  areaRai          Float                                   @map("area_rai")
   plotType         String                                  @map("plot_type")
-  irrigationSource String?                                 @map("irrigation_source")
-  landLeveling     String?                                 @map("land_leveling")
-  siteId           String?                                 @map("site_id")
-  polyid           String?                                 @map("polyid")
-  site             Site?                                   @relation(fields: [siteId], references: [id])
+  irrigationSource String                                  @map("irrigation_source")
+  siteId           String                                  @map("site_id")
+  site             Site                                    @relation(fields: [siteId], references: [id])
   carbonRecords    CarbonRecord[]
   ndviHistory      PlotNdviHistory[]
   createdAt        DateTime                                @default(now()) @map("created_at")
@@ -63,27 +61,6 @@ model CarbonRecord {
   @@map("carbon_records")
 }
 
-enum LayerType {
-  RGB
-  NDVI
-}
-
-model MapTileRecord {
-  id         String    @id @default(uuid())
-  farmId     String    @map("farm_id")
-  date       DateTime
-  layerType  LayerType @map("layer_type")
-  minZoom    Int       @default(10) @map("min_zoom")
-  maxZoom    Int       @default(18) @map("max_zoom")
-  baseUrl    String    @map("base_url")
-  cloudCover Float?    @map("cloud_cover")
-  createdAt  DateTime  @default(now()) @map("created_at")
-  updatedAt  DateTime  @updatedAt @map("updated_at")
-
-  @@unique([farmId, date, layerType])
-  @@index([farmId, date])
-  @@map("map_tile_records")
-}
 
 model PlotNdviHistory {
   id         String   @id @default(uuid())
@@ -93,7 +70,7 @@ model PlotNdviHistory {
   mean       Float
   max        Float
   min        Float
-  cloudCover Float?   @map("cloud_cover")
+  cloudCover Float    @map("cloud_cover")
   createdAt  DateTime @default(now()) @map("created_at")
 
   @@unique([plotId, date])

@@ -15,8 +15,8 @@ export interface PlotRow {
   area_ha: number;
   area_rai: number;
   plot_type: string;
-  site_id?: string;
-  polyid?: string;
+  site_id: string;
+  irrigation_source: string;
   geometry?: string;
 }
 
@@ -68,13 +68,11 @@ export class PlotsService {
       coordinates: [polygonCoordinates],
     });
 
-    const polyid: string | null = null;
-
     // Insert with PostGIS area calculation
     const query = Prisma.sql`
       INSERT INTO "plots" (
         "id", "farm_id", "plot_name", "plot_type", "geometry",
-        "area_ha", "area_rai", "site_id", "polyid", "created_at", "updated_at"
+        "area_ha", "area_rai", "site_id", "irrigation_source", "created_at", "updated_at"
       )
       VALUES (
         gen_random_uuid(),
@@ -84,12 +82,12 @@ export class PlotsService {
         ST_SetSRID(ST_GeomFromGeoJSON(${geoJsonString}), 4326),
         ST_Area(ST_GeomFromGeoJSON(${geoJsonString})::geography) / 10000,
         ST_Area(ST_GeomFromGeoJSON(${geoJsonString})::geography) / 1600,
-        ${siteId ?? null},
-        ${polyid ?? null},
+        ${siteId},
+        'AWD',
         NOW(),
         NOW()
       )
-      RETURNING id, plot_name, area_ha, area_rai, plot_type, site_id, polyid;
+      RETURNING id, plot_name, area_ha, area_rai, plot_type, site_id, irrigation_source;
     `;
 
     const result = await this.prisma.$queryRaw<PlotRow[]>(query);

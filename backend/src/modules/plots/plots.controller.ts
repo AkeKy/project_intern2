@@ -8,7 +8,6 @@ export class PlotsController {
 
   @Post()
   async create(@Body() createPlotDto: CreatePlotDto) {
-    console.log('Received create plot request:', createPlotDto);
     return this.plotsService.create(createPlotDto);
   }
 

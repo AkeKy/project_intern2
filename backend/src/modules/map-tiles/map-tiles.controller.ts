@@ -1,6 +1,5 @@
-import { Controller, Get, Param, Post, Body, Res } from '@nestjs/common';
+import { Controller, Get, Param, Res } from '@nestjs/common';
 import { MapTilesService } from './map-tiles.service';
-import { CreateMapTileDto } from './dto/create-map-tile.dto';
 import type { Response } from 'express';
 
 @Controller('map-tiles')
@@ -45,10 +44,5 @@ export class MapTilesController {
       'Cache-Control': 'public, max-age=86400', // Cache for 1 day
     });
     res.send(Buffer.from(imageBuffer));
-  }
-
-  @Post()
-  createMapTileRecord(@Body() createMapTileDto: CreateMapTileDto) {
-    return this.mapTilesService.createMapTileRecord(createMapTileDto);
   }
 }

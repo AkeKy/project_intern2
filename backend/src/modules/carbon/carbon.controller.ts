@@ -20,7 +20,6 @@ export class CarbonController {
 
   @Post('save')
   async save(@Body() dto: SaveCarbonDto) {
-    console.log('Received save request:', dto);
     return this.carbonService.saveCalculation(dto);
   }
 

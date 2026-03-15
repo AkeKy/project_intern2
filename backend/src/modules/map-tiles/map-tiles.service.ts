@@ -1,12 +1,9 @@
 import {
   Injectable,
   NotFoundException,
-  HttpException,
-  HttpStatus,
   Logger,
 } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
-import { CreateMapTileDto } from './dto/create-map-tile.dto';
 import { CopernicusService, type GeoJsonGeometry } from './copernicus.service';
 
 // ── Type definitions ────────────────────────────────────────────────────────
@@ -119,13 +116,5 @@ export class MapTilesService {
     if (!plot) throw new NotFoundException('Plot not found');
 
     return this.copernicusService.getTileImage(dateStr, layerType, z, x, y);
-  }
-
-  // Deprecated function for the legacy Python manual pipeline
-  createMapTileRecord(_data: CreateMapTileDto) {
-    throw new HttpException(
-      'Manual tile parsing is deprecated via Copernicus pipeline',
-      HttpStatus.GONE,
-    );
   }
 }

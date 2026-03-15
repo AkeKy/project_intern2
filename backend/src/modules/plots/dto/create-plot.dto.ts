@@ -3,7 +3,6 @@ import {
   IsNotEmpty,
   IsNumber,
   IsArray,
-  IsOptional,
   ValidateNested,
   IsEnum,
 } from 'class-validator';
@@ -37,8 +36,8 @@ export class CreatePlotDto {
   plotType: PlotType;
 
   @IsString()
-  @IsOptional()
-  siteId?: string;
+  @IsNotEmpty()
+  siteId: string;
 
   @IsArray()
   @ValidateNested({ each: true })
