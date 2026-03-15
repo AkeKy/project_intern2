@@ -42,5 +42,8 @@
   "siteName": "ชื่อไซต์",
   "province": "จังหวัด",
   "noSites": "ยังไม่มีไซต์ กดสร้างได้เลย",
-  "ponds": "บ่อ"
+  "ponds": "บ่อ",
+  "searchHint": "ค้นหาพื้นที่...",
+  "noSearchResults": "ไม่พบผลลัพธ์",
+  "goToLocation": "ไปยังตำแหน่งนี้"
 }

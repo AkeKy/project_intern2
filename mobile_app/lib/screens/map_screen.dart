@@ -38,6 +38,10 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
   double? _currentHeading;
   bool _isLoadingPonds = false;
 
+  // Search state
+  final TextEditingController _searchController = TextEditingController();
+  String _searchQuery = '';
+
   // Custom AI Map Layer State
   List<dynamic> _availableMapDates = [];
   String? _selectedMapDate;
@@ -175,6 +179,8 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
       _selectedLayerType = null;
       _selectedLayerBaseUrl = null;
       _isLoadingPonds = false;
+      _searchQuery = '';
+      _searchController.clear();
     });
 
     // Show error if no ponds returned – likely a network/IP issue
@@ -873,6 +879,19 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
     return inside;
   }
 
+  // ─── Lat/Long Detection ──────────────────────────────────
+  LatLng? _parseLatLng(String input) {
+    // Supports: "14.35, 100.56" or "14.35 100.56" or "14.35,100.56"
+    final regex = RegExp(r'^\s*(-?\d+\.?\d*)\s*[,\s]\s*(-?\d+\.?\d*)\s*$');
+    final match = regex.firstMatch(input);
+    if (match == null) return null;
+    final lat = double.tryParse(match.group(1)!);
+    final lng = double.tryParse(match.group(2)!);
+    if (lat == null || lng == null) return null;
+    if (lat < -90 || lat > 90 || lng < -180 || lng > 180) return null;
+    return LatLng(lat, lng);
+  }
+
   // ─── Build Drawer ───────────────────────────────────────
   Widget _buildDrawer(AppLocalizations t) {
     return Drawer(
@@ -887,6 +906,64 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
             ),
             decoration: const BoxDecoration(color: Colors.green),
           ),
+          // ─── Search Bar ─────────────────────────────────
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+            child: TextField(
+              controller: _searchController,
+              decoration: InputDecoration(
+                hintText: t.tr('searchHint'),
+                prefixIcon: const Icon(Icons.search),
+                suffixIcon: _searchQuery.isNotEmpty
+                    ? IconButton(
+                        icon: const Icon(Icons.clear),
+                        onPressed: () {
+                          setState(() {
+                            _searchController.clear();
+                            _searchQuery = '';
+                          });
+                        },
+                      )
+                    : null,
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                contentPadding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 10,
+                ),
+                filled: true,
+                fillColor: Colors.grey.shade100,
+              ),
+              onChanged: (value) {
+                setState(() => _searchQuery = value.trim());
+              },
+            ),
+          ),
+          // ─── Lat/Long Go-To Button ──────────────────────
+          if (_searchQuery.isNotEmpty && _parseLatLng(_searchQuery) != null)
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+              child: SizedBox(
+                width: double.infinity,
+                child: ElevatedButton.icon(
+                  icon: const Icon(Icons.map, size: 18),
+                  label: Text(t.tr('goToLocation')),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.blue,
+                    foregroundColor: Colors.white,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                  ),
+                  onPressed: () {
+                    final latLng = _parseLatLng(_searchQuery)!;
+                    Navigator.pop(context);
+                    _moveAnimated(latLng, 16.0);
+                  },
+                ),
+              ),
+            ),
           // Active Site indicator
           if (_activeSite != null)
             Container(
@@ -908,6 +985,8 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
                       _selectedMapDate = null;
                       _selectedLayerType = null;
                       _selectedLayerBaseUrl = null;
+                      _searchQuery = '';
+                      _searchController.clear();
                     });
                   },
                 ),
@@ -955,10 +1034,24 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
     if (_sites.isEmpty) {
       return Center(child: Text(t.tr('noSites')));
     }
+
+    final query = _searchQuery.toLowerCase();
+    final filteredSites = query.isEmpty
+        ? _sites
+        : _sites.where((site) {
+            final name = (site['name'] ?? '').toString().toLowerCase();
+            final province = (site['province'] ?? '').toString().toLowerCase();
+            return name.contains(query) || province.contains(query);
+          }).toList();
+
+    if (filteredSites.isEmpty) {
+      return Center(child: Text(t.tr('noSearchResults')));
+    }
+
     return ListView.builder(
-      itemCount: _sites.length + 1, // +1 for "Create Site" button
+      itemCount: filteredSites.length + (query.isEmpty ? 1 : 0),
       itemBuilder: (context, index) {
-        if (index == _sites.length) {
+        if (query.isEmpty && index == filteredSites.length) {
           return ListTile(
             leading: const Icon(Icons.add_circle_outline, color: Colors.green),
             title: Text(t.tr('createSite')),
@@ -968,7 +1061,7 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
             },
           );
         }
-        final site = _sites[index];
+        final site = filteredSites[index];
         final plotCount = (site['plots'] as List?)?.length ?? 0;
         return ListTile(
           leading: const Icon(Icons.location_on, color: Colors.green),
@@ -990,10 +1083,24 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
     if (_sitePonds.isEmpty) {
       return Center(child: Text(t.tr('noPlots')));
     }
+
+    final query = _searchQuery.toLowerCase();
+    final filteredPonds = query.isEmpty
+        ? _sitePonds
+        : _sitePonds.where((pond) {
+            final name = (pond['plot_name'] ?? '').toString().toLowerCase();
+            final type = (pond['plot_type'] ?? '').toString().toLowerCase();
+            return name.contains(query) || type.contains(query);
+          }).toList();
+
+    if (filteredPonds.isEmpty) {
+      return Center(child: Text(t.tr('noSearchResults')));
+    }
+
     return ListView.builder(
-      itemCount: _sitePonds.length,
+      itemCount: filteredPonds.length,
       itemBuilder: (context, index) {
-        final pond = _sitePonds[index];
+        final pond = filteredPonds[index];
         final areaRai = pond['area_rai'] != null
             ? (pond['area_rai'] as num).toDouble()
             : 0.0;
