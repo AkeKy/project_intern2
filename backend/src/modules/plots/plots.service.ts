@@ -158,12 +158,23 @@ export class PlotsService {
     let startDate: Date;
     let endDate: Date;
 
+    // endDate must never exceed today — Copernicus has no future imagery
+    const today = new Date();
+
     if (latestRecord?.startDate && latestRecord?.harvestDate) {
+      // Use crop cycle dates but clamp endDate to today
       startDate = latestRecord.startDate;
-      endDate = latestRecord.harvestDate;
+      endDate =
+        latestRecord.harvestDate > today ? today : latestRecord.harvestDate;
     } else {
-      endDate = new Date();
+      endDate = today;
       startDate = new Date(Date.now() - 180 * 24 * 60 * 60 * 1000);
+    }
+
+    // Ensure we have at least 180 days of data to query for historical context
+    const minRange = 180 * 24 * 60 * 60 * 1000;
+    if (endDate.getTime() - startDate.getTime() < minRange) {
+      startDate = new Date(endDate.getTime() - minRange);
     }
 
     // 3. Search for cached records within this range
@@ -178,16 +189,22 @@ export class PlotsService {
     `;
 
     // 4. Determine if we need to fetch fresh data
-    const shouldFetch = this.shouldRefetchNdvi(cachedHistory, endDate);
+    const shouldFetch = this.shouldRefetchNdvi(
+      cachedHistory,
+      startDate,
+      endDate,
+    );
 
     if (shouldFetch) {
-      this.logger.log(`Fetching fresh NDVI history for plot ${plotId}`);
       try {
+        const startTime = Date.now();
         const stats = await this.copernicusService.getNdviStatistics(
           geometry,
           startDate.toISOString().split('T')[0],
           endDate.toISOString().split('T')[0],
         );
+        const duration = Date.now() - startTime;
+        this.logger.log(`Fetched ${stats.length} NDVI stats in ${duration}ms`);
 
         if (stats.length > 0) {
           // Upsert stats into database
@@ -200,27 +217,64 @@ export class PlotsService {
               DO UPDATE SET mean = ${stat.mean}, max = ${stat.max}, min = ${stat.min}, cloud_cover = ${stat.cloudCover}
             `;
           }
-
-          // Return fresh db records
-          return await this.prisma.$queryRaw<NdviHistoryRecord[]>`
-            SELECT id, plot_id AS "plotId", date, mean, max, min,
-                   cloud_cover AS "cloudCover", created_at AS "createdAt"
-            FROM plot_ndvi_history
-            WHERE plot_id = ${plotId}
-              AND date >= ${startDate}
-              AND date <= ${endDate}
-            ORDER BY date ASC
-          `;
         }
       } catch (error: unknown) {
         const errMsg = error instanceof Error ? error.message : 'Unknown error';
         this.logger.error(
-          `Failed to fetch NDVI stats, returning cache if available: ${errMsg}`,
+          `Failed to fetch NDVI stats for plot ${plotId}: ${errMsg}`,
         );
+        if (error instanceof Error && 'response' in error) {
+          let details = '';
+          if ((error as any).response?.data) {
+            details = JSON.stringify((error as any).response?.data || {});
+          }
+          this.logger.error(
+            `Copernicus API response: status=${(error as any).response?.status}, data=${details}`,
+          );
+        }
       }
     }
 
-    return cachedHistory;
+    const finalHistory = await this.prisma.$queryRaw<NdviHistoryRecord[]>`
+      SELECT id, plot_id AS "plotId", date, mean, max, min,
+             cloud_cover AS "cloudCover", created_at AS "createdAt"
+      FROM plot_ndvi_history
+      WHERE plot_id = ${plotId}
+        AND date >= ${startDate}
+        AND date <= ${endDate}
+      ORDER BY date ASC
+    `;
+
+    return this.smoothNdviHistory(finalHistory);
+  }
+
+  /**
+   * Smooth NDVI data to remove noise from clouds
+   */
+  private smoothNdviHistory(records: NdviHistoryRecord[]): NdviHistoryRecord[] {
+    if (records.length === 0) return records;
+
+    // 1. Strict Filtering: Only keep data with < 15% cloud probability.
+    // If no images match this, we return an empty list as requested by the user.
+    const base = records.filter((r) => (r.cloudCover ?? 0) < 15);
+
+    if (base.length < 3) return base;
+
+    // 2. Simple Moving Average (window of 3) to further remove noise
+    return base.map((record, i, arr) => {
+      if (i === 0 || i === arr.length - 1) return record;
+
+      const prev = arr[i - 1];
+      const next = arr[i + 1];
+
+      // Average the values over 3 points
+      return {
+        ...record,
+        mean: (prev.mean + record.mean + next.mean) / 3,
+        max: (prev.max + record.max + next.max) / 3,
+        min: (prev.min + record.min + next.min) / 3,
+      };
+    });
   }
 
   /**
@@ -228,6 +282,7 @@ export class PlotsService {
    */
   private shouldRefetchNdvi(
     cachedHistory: NdviHistoryRecord[],
+    startDate: Date,
     endDate: Date,
   ): boolean {
     const ONE_DAY_MS = 24 * 60 * 60 * 1000;
@@ -236,10 +291,19 @@ export class PlotsService {
       return true;
     }
 
-    const latestCachedDate = cachedHistory[cachedHistory.length - 1].createdAt;
-    const isOutdated = Date.now() - latestCachedDate.getTime() > ONE_DAY_MS;
+    // Check if the cache is missing historical data we now want
+    const earliestCachedDate = new Date(cachedHistory[0].date);
+    const isMissingHistory =
+      earliestCachedDate.getTime() > startDate.getTime() + ONE_DAY_MS;
 
-    // If cycle is not finished (endDate is today or in future) and cache is old, re-fetch
-    return isOutdated && endDate.getTime() >= Date.now() - ONE_DAY_MS;
+    const latestCachedInsert = cachedHistory[cachedHistory.length - 1].createdAt;
+    const isOutdated =
+      Date.now() - latestCachedInsert.getTime() > ONE_DAY_MS;
+
+    // Fetch if cache is missing history OR if current cycle is still active and cache is old
+    const needsFreshUpdate =
+      endDate.getTime() >= Date.now() - ONE_DAY_MS && isOutdated;
+
+    return isMissingHistory || needsFreshUpdate;
   }
 }

@@ -3,37 +3,84 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import '../models/plot_ndvi_history.dart';
 
-class NdviChartWidget extends StatelessWidget {
+class NdviChartWidget extends StatefulWidget {
   final List<PlotNdviHistory> history;
+  final VoidCallback? onRetry;
 
-  const NdviChartWidget({super.key, required this.history});
+  const NdviChartWidget({super.key, required this.history, this.onRetry});
+
+  @override
+  State<NdviChartWidget> createState() => _NdviChartWidgetState();
+}
+
+class _NdviChartWidgetState extends State<NdviChartWidget> {
+  int _selectedDays = 180;
 
   @override
   Widget build(BuildContext context) {
-    if (history.isEmpty) {
-      return const Center(
-        child: Text(
-          'No NDVI history available for this plot.',
-          style: TextStyle(color: Colors.white70),
+    if (widget.history.isEmpty) {
+      return Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.show_chart, size: 48, color: Colors.grey.shade400),
+            const SizedBox(height: 12),
+            const Text(
+              'ยังไม่มีข้อมูล NDVI สำหรับแปลงนี้',
+              style: TextStyle(color: Colors.white60, fontSize: 14),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 4),
+            const Text(
+              'ระบบกำลังดึงข้อมูลจากดาวเทียม\nอาจใช้เวลาสักครู่',
+              style: TextStyle(color: Colors.white30, fontSize: 12),
+              textAlign: TextAlign.center,
+            ),
+            if (widget.onRetry != null) ...[
+              const SizedBox(height: 16),
+              ElevatedButton.icon(
+                onPressed: widget.onRetry,
+                icon: const Icon(Icons.refresh, size: 18),
+                label: const Text('ลองใหม่อีกครั้ง'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.white10,
+                  foregroundColor: Colors.white70,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                ),
+              ),
+            ],
+          ],
         ),
       );
     }
 
-    // Sort history by date to ensure proper timeline
-    final sortedHistory = List<PlotNdviHistory>.from(
-      history,
-    )..sort((a, b) => DateTime.parse(a.date).compareTo(DateTime.parse(b.date)));
+    // 1. Filter and Sort
+    final now = DateTime.now();
+    final cutoffDate = now.subtract(Duration(days: _selectedDays));
 
-    final minDate = DateTime.parse(sortedHistory.first.date);
-    final maxDate = DateTime.parse(sortedHistory.last.date);
+    final filteredHistory = widget.history.where((item) {
+      return DateTime.parse(item.date).isAfter(cutoffDate);
+    }).toList();
+
+    filteredHistory.sort(
+      (a, b) => DateTime.parse(a.date).compareTo(DateTime.parse(b.date)),
+    );
+
+    if (filteredHistory.isEmpty) {
+      return _buildEmptyContent('ไม่มีข้อมูลในช่วง $_selectedDays วันที่เลือก');
+    }
+
+    final minDate = DateTime.parse(filteredHistory.first.date);
+    final maxDate = DateTime.parse(filteredHistory.last.date);
     final dateRangeSpan = maxDate.difference(minDate).inDays;
 
-    // We convert Dates to double (days from minDate) for X-axis
-    List<FlSpot> meanSpots = [];
-    List<FlSpot> maxSpots = [];
-    List<FlSpot> minSpots = [];
+    final List<FlSpot> meanSpots = [];
+    final List<FlSpot> maxSpots = [];
+    final List<FlSpot> minSpots = [];
 
-    for (var stat in sortedHistory) {
+    for (var stat in filteredHistory) {
       final date = DateTime.parse(stat.date);
       final xValue = date.difference(minDate).inDays.toDouble();
       meanSpots.add(FlSpot(xValue, stat.mean));
@@ -43,49 +90,53 @@ class NdviChartWidget extends StatelessWidget {
 
     return Container(
       decoration: BoxDecoration(
-        color: const Color(0xFF1E2130), // Dark premium background
+        color: const Color(0xFF1E2130),
         borderRadius: BorderRadius.circular(16),
       ),
-      padding: const EdgeInsets.all(20),
+      padding: const EdgeInsets.all(16),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Column(
+              const Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text(
+                  Text(
                     'Historical',
                     style: TextStyle(
                       color: Colors.white54,
-                      fontSize: 14,
+                      fontSize: 12,
                       fontWeight: FontWeight.w500,
                     ),
                   ),
-                  const Text(
+                  Text(
                     'NDVI',
                     style: TextStyle(
                       color: Colors.white,
-                      fontSize: 24,
+                      fontSize: 22,
                       fontWeight: FontWeight.bold,
                     ),
                   ),
                 ],
               ),
-              Row(
-                children: [
-                  _buildLegendItem('Max', Colors.blue.shade300),
-                  const SizedBox(width: 12),
-                  _buildLegendItem('Mean', Colors.greenAccent),
-                  const SizedBox(width: 12),
-                  _buildLegendItem('Min', Colors.blue.shade700),
-                ],
-              ),
+              _buildFilterToggle(),
             ],
           ),
-          const SizedBox(height: 30),
+          const SizedBox(height: 12),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.end,
+            children: [
+              _buildLegendItem('Max', Colors.blue.shade300),
+              const SizedBox(width: 12),
+              _buildLegendItem('Mean', Colors.greenAccent),
+              const SizedBox(width: 12),
+              _buildLegendItem('Min', Colors.blue.shade700),
+            ],
+          ),
+          const SizedBox(height: 20),
           Expanded(
             child: LineChart(
               LineChartData(
@@ -98,7 +149,7 @@ class NdviChartWidget extends StatelessWidget {
                   drawVerticalLine: true,
                   drawHorizontalLine: false,
                   getDrawingVerticalLine: (value) =>
-                      FlLine(color: Colors.white10, strokeWidth: 1),
+                      const FlLine(color: Colors.white10, strokeWidth: 1),
                 ),
                 titlesData: FlTitlesData(
                   show: true,
@@ -111,16 +162,13 @@ class NdviChartWidget extends StatelessWidget {
                   leftTitles: AxisTitles(
                     sideTitles: SideTitles(
                       showTitles: true,
-                      reservedSize: 40,
+                      reservedSize: 35,
                       getTitlesWidget: (value, meta) {
-                        return Padding(
-                          padding: const EdgeInsets.only(right: 8.0),
-                          child: Text(
-                            value.toStringAsFixed(1),
-                            style: const TextStyle(
-                              color: Colors.white54,
-                              fontSize: 12,
-                            ),
+                        return Text(
+                          value.toStringAsFixed(1),
+                          style: const TextStyle(
+                            color: Colors.white54,
+                            fontSize: 10,
                           ),
                         );
                       },
@@ -129,12 +177,8 @@ class NdviChartWidget extends StatelessWidget {
                   bottomTitles: AxisTitles(
                     sideTitles: SideTitles(
                       showTitles: true,
-                      reservedSize: 60,
-                      interval: dateRangeSpan > 0
-                          ? (dateRangeSpan / 4)
-                                .clamp(1, dateRangeSpan)
-                                .toDouble()
-                          : 1,
+                      reservedSize: 45,
+                      interval: (dateRangeSpan / 3).clamp(1, 180).toDouble(),
                       getTitlesWidget: (value, meta) {
                         final date = minDate.add(Duration(days: value.toInt()));
                         return Padding(
@@ -142,10 +186,10 @@ class NdviChartWidget extends StatelessWidget {
                           child: Transform.rotate(
                             angle: -45 * 3.14159 / 180,
                             child: Text(
-                              DateFormat('MMM d, yyyy').format(date),
+                              DateFormat('MMM d').format(date),
                               style: const TextStyle(
                                 color: Colors.white54,
-                                fontSize: 10,
+                                fontSize: 9,
                               ),
                             ),
                           ),
@@ -156,51 +200,13 @@ class NdviChartWidget extends StatelessWidget {
                 ),
                 borderData: FlBorderData(show: false),
                 lineBarsData: [
-                  // MIN Line
-                  LineChartBarData(
-                    spots: minSpots,
-                    isCurved: true,
-                    color: Colors.blue.shade700,
-                    barWidth: 3,
-                    isStrokeCapRound: true,
-                    dotData: const FlDotData(show: true),
-                    belowBarData: BarAreaData(show: false),
-                  ),
-                  // MAX Line
-                  LineChartBarData(
-                    spots: maxSpots,
-                    isCurved: true,
-                    color: Colors.blue.shade300,
-                    barWidth: 3,
-                    isStrokeCapRound: true,
-                    dotData: const FlDotData(show: true),
-                    belowBarData: BarAreaData(show: false),
-                  ),
-                  // MEAN Line
-                  LineChartBarData(
-                    spots: meanSpots,
-                    isCurved: true,
-                    color: Colors.greenAccent,
-                    barWidth: 4,
-                    isStrokeCapRound: true,
-                    dotData: const FlDotData(show: true),
-                    belowBarData: BarAreaData(
-                      show: true,
-                      gradient: LinearGradient(
-                        begin: Alignment.topCenter,
-                        end: Alignment.bottomCenter,
-                        colors: [
-                          Colors.greenAccent.withOpacity(0.3),
-                          Colors.transparent,
-                        ],
-                      ),
-                    ),
-                  ),
+                  _lineData(minSpots, Colors.blue.shade700, 2),
+                  _lineData(maxSpots, Colors.blue.shade300, 2),
+                  _lineData(meanSpots, Colors.greenAccent, 3, shaded: true),
                 ],
                 lineTouchData: LineTouchData(
-                  enabled: true,
                   touchTooltipData: LineTouchTooltipData(
-                    getTooltipColor: (touchedSpot) => Colors.black87,
+                    getTooltipColor: (_) => Colors.black87,
                     getTooltipItems: (touchedSpots) {
                       return touchedSpots.map((spot) {
                         final date = minDate.add(
@@ -212,11 +218,8 @@ class NdviChartWidget extends StatelessWidget {
                         if (spot.barIndex == 2) prefix = "Mean: ";
 
                         return LineTooltipItem(
-                          DateFormat('MMM d').format(date) +
-                              '\n' +
-                              prefix +
-                              spot.y.toStringAsFixed(3),
-                          const TextStyle(color: Colors.white, fontSize: 12),
+                          '${DateFormat('MMM d').format(date)}\n$prefix${spot.y.toStringAsFixed(3)}',
+                          const TextStyle(color: Colors.white, fontSize: 11),
                         );
                       }).toList();
                     },
@@ -230,20 +233,96 @@ class NdviChartWidget extends StatelessWidget {
     );
   }
 
+  Widget _buildFilterToggle() {
+    return Container(
+      padding: const EdgeInsets.all(4),
+      decoration: BoxDecoration(
+        color: Colors.white.withOpacity(0.05),
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [60, 120, 180].map((days) {
+          final isSelected = _selectedDays == days;
+          return GestureDetector(
+            onTap: () => setState(() => _selectedDays = days),
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 200),
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+              decoration: BoxDecoration(
+                color: isSelected ? Colors.greenAccent : Colors.transparent,
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Text(
+                '${days}D',
+                style: TextStyle(
+                  color: isSelected ? Colors.black : Colors.white54,
+                  fontSize: 10,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ),
+          );
+        }).toList(),
+      ),
+    );
+  }
+
+  LineChartBarData _lineData(
+    List<FlSpot> spots,
+    Color color,
+    double width, {
+    bool shaded = false,
+  }) {
+    return LineChartBarData(
+      spots: spots,
+      isCurved: true,
+      color: color,
+      barWidth: width,
+      isStrokeCapRound: true,
+      dotData: const FlDotData(show: false),
+      belowBarData: BarAreaData(
+        show: shaded,
+        gradient: LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          colors: [color.withOpacity(0.2), Colors.transparent],
+        ),
+      ),
+    );
+  }
+
   Widget _buildLegendItem(String title, Color color) {
     return Row(
+      mainAxisSize: MainAxisSize.min,
       children: [
         Container(
-          width: 12,
-          height: 12,
+          width: 8,
+          height: 8,
           decoration: BoxDecoration(color: color, shape: BoxShape.circle),
         ),
         const SizedBox(width: 4),
         Text(
           title,
-          style: const TextStyle(color: Colors.white70, fontSize: 12),
+          style: const TextStyle(color: Colors.white70, fontSize: 10),
         ),
       ],
     );
   }
+
+  Widget _buildEmptyContent(String message) {
+    return Center(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Icon(Icons.history, size: 40, color: Colors.white24),
+          const SizedBox(height: 10),
+          Text(message, style: const TextStyle(color: Colors.white30)),
+          const SizedBox(height: 10),
+          _buildFilterToggle(),
+        ],
+      ),
+    );
+  }
 }
+

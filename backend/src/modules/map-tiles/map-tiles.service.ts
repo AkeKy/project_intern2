@@ -1,8 +1,4 @@
-import {
-  Injectable,
-  NotFoundException,
-  Logger,
-} from '@nestjs/common';
+import { Injectable, NotFoundException, Logger } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CopernicusService, type GeoJsonGeometry } from './copernicus.service';
 
@@ -47,25 +43,12 @@ export class MapTilesService {
       plotRows[0].geometry_geojson,
     ) as GeoJsonGeometry;
 
-    // Fetch the latest carbon record for this plot to get the crop cycle dates
-    const latestRecord = await this.prisma.carbonRecord.findFirst({
-      where: { plotId: plotId },
-      orderBy: { createdAt: 'desc' },
-    });
-
-    let startDate: string;
-    let endDate: string;
-
-    if (latestRecord?.startDate && latestRecord?.harvestDate) {
-      startDate = latestRecord.startDate.toISOString();
-      endDate = latestRecord.harvestDate.toISOString();
-    } else {
-      // Fallback to last 6 months if no dates are provided
-      endDate = new Date().toISOString();
-      startDate = new Date(
-        Date.now() - 180 * 24 * 60 * 60 * 1000,
-      ).toISOString();
-    }
+    // Always fetch the last 180 days up to today to ensure we find cloud-free images,
+    // even if the user's crop cycle just started or is in the future.
+    const endDate = new Date().toISOString();
+    const startDate = new Date(
+      Date.now() - 180 * 24 * 60 * 60 * 1000,
+    ).toISOString();
 
     // Pass GeoJSON and dates to Copernicus Service to search catalog
     return this.copernicusService.getAvailableDates(
@@ -90,11 +73,11 @@ export class MapTilesService {
     const results: LayerInfo[] = [
       {
         layerType: 'RGB',
-        baseUrl: `/proxy/${plotId}/${targetDateStr}/RGB`,
+        baseUrl: `/map-tiles/proxy/${plotId}/${targetDateStr}/RGB`,
       },
       {
         layerType: 'NDVI',
-        baseUrl: `/proxy/${plotId}/${targetDateStr}/NDVI`,
+        baseUrl: `/map-tiles/proxy/${plotId}/${targetDateStr}/NDVI`,
       },
     ];
 

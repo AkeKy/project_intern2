@@ -3,7 +3,6 @@ import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:flutter_compass/flutter_compass.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 
 import '../message/app_localizations.dart';
 import '../services/api_service.dart';
@@ -25,9 +24,6 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
   final MapController _mapController = MapController();
   final ApiService _api = ApiService();
 
-  // Mock Admin State
-  bool _isAdmin = false;
-
   // Sites & Ponds
   List<dynamic> _sites = [];
   Map<String, dynamic>? _activeSite; // Currently selected site
@@ -46,26 +42,18 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
   List<dynamic> _availableMapDates = [];
   String? _selectedMapDate;
 
+  bool _hasConnectionError = false;
+
   List<dynamic> _availableLayers = [];
   String? _selectedLayerType; // e.g., 'RGB', 'NDVI'
   String? _selectedLayerBaseUrl;
+  String? _activePlotId; // For selecting which plot's map layer to show
 
   @override
   void initState() {
     super.initState();
-    _loadAdminState();
     _fetchSites();
     _initCompass();
-  }
-
-  // ─── Load Preferences ───────────────────────────────────
-  Future<void> _loadAdminState() async {
-    final prefs = await SharedPreferences.getInstance();
-    if (mounted) {
-      setState(() {
-        _isAdmin = prefs.getBool('is_admin') ?? false;
-      });
-    }
   }
 
   // ─── Animated Rotation to North ──────────────────────────
@@ -153,22 +141,47 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
 
   // ─── Fetch Sites ────────────────────────────────────────
   Future<void> _fetchSites() async {
-    await _api.init(); // Wait for stored IP configuration
-    final sites = await _api.fetchSites();
-    if (mounted) {
-      setState(() => _sites = sites);
-      // Auto-load the first site's plots so the map isn't empty on startup
-      if (sites.isNotEmpty && _activeSite == null) {
-        _selectSite(sites.first);
+    try {
+      if (mounted) setState(() => _hasConnectionError = false);
+      
+      await _api.init(); // Wait for stored IP configuration
+      final sites = await _api.fetchSites();
+      
+      if (mounted) {
+        setState(() => _sites = sites);
+        // Auto-load the first site's plots so the map isn't empty on startup
+        if (sites.isNotEmpty && _activeSite == null) {
+          _selectSite(sites.first, moveCamera: true);
+        }
+      }
+    } catch (e) {
+      debugPrint('Initial fetch failed: $e');
+      if (mounted) {
+        setState(() => _hasConnectionError = true);
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('เชื่อมต่อเซิร์ฟเวอร์ไม่ได้ ตรวจสอบการตั้งค่า IP')),
+        );
       }
     }
   }
 
   // ─── Select Site → Load Ponds ───────────────────────────
-  Future<void> _selectSite(Map<String, dynamic> site) async {
+  Future<void> _selectSite(
+    Map<String, dynamic> site, {
+    bool moveCamera = true,
+  }) async {
     if (mounted) setState(() => _isLoadingPonds = true);
 
-    final ponds = await _api.fetchPlotsBySite(site['id']);
+    List<dynamic> ponds = [];
+    bool fetchFailed = false;
+
+    try {
+      ponds = await _api.fetchPlotsBySite(site['id']);
+    } catch (e) {
+      debugPrint('Failed to load ponds: $e');
+      fetchFailed = true;
+    }
+
     if (!mounted) return;
 
     setState(() {
@@ -181,10 +194,14 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
       _isLoadingPonds = false;
       _searchQuery = '';
       _searchController.clear();
+      if (ponds.isNotEmpty) {
+        _activePlotId = ponds.first['id'] as String;
+      } else {
+        _activePlotId = null;
+      }
     });
 
-    // Show error if no ponds returned – likely a network/IP issue
-    if (ponds.isEmpty && mounted) {
+    if (fetchFailed && mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: const Text(
@@ -192,16 +209,16 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
           ),
           action: SnackBarAction(
             label: 'ลองใหม่',
-            onPressed: () => _selectSite(site),
+            onPressed: () => _selectSite(site, moveCamera: moveCamera),
           ),
           duration: const Duration(seconds: 6),
         ),
       );
     }
 
-    // Check for available satellite imagery dates (uses first plot's polyid)
-    if (ponds.isNotEmpty) {
-      final plotId = ponds.first['id'] as String;
+    // Check for available satellite imagery dates (uses active plot's ID)
+    if (ponds.isNotEmpty && _activePlotId != null) {
+      final plotId = _activePlotId!;
       final dates = await _api.fetchMapDates(plotId);
       if (mounted) setState(() => _availableMapDates = dates);
     } else {
@@ -209,16 +226,23 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
     }
 
     // Zoom to site location or first pond
-    if (site['latitude'] != null && site['longitude'] != null) {
-      _mapController.move(
-        LatLng(
-          (site['latitude'] as num).toDouble(),
-          (site['longitude'] as num).toDouble(),
-        ),
-        15.0,
-      );
-    } else if (ponds.isNotEmpty) {
-      _fitToPonds(ponds);
+    if (moveCamera) {
+      if (ponds.isNotEmpty) {
+        // PRIORITY 1: Fit to all plots in this site
+        _fitToPonds(ponds);
+      } else {
+        // PRIORITY 2: Move to site centroid (only if valid and not a default city coordinate)
+        final lat = site['latitude'] != null ? (site['latitude'] as num).toDouble() : 0.0;
+        final lng = site['longitude'] != null ? (site['longitude'] as num).toDouble() : 0.0;
+
+        // Skip moving to known default "city" coordinates (Bangkok/Ayutthaya) or (0,0)
+        bool isDefaultCity = (lat == 13.7367 && lng == 100.5231) || 
+                             (lat == 14.3532 && lng == 100.5684);
+
+        if (lat != 0 && lng != 0 && !isDefaultCity) {
+          _mapController.move(LatLng(lat, lng), 15.0);
+        }
+      }
     }
   }
 
@@ -333,55 +357,74 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
 
     showDialog(
       context: context,
-      builder: (_) => AlertDialog(
-        title: Text(pond['plot_name'] ?? t.tr('plotDetail')),
-        content: SizedBox(
-          width: double.maxFinite,
-          child: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text('${t.tr('typeLabel')}: $plotType'),
-                Text('${t.tr('areaLabel')}: ${formatThaiArea(areaRai)}'),
-                const SizedBox(height: 10),
-                if (carbonResult != null) ...[
-                  const Divider(),
-                  Text(
-                    t.tr('carbonResult'),
-                    style: const TextStyle(fontWeight: FontWeight.bold),
-                  ),
-                  const SizedBox(height: 5),
-                  Text(
-                    '${t.tr('gasReduction')}: ${carbonResult['carbon_credit_ton']} tCO₂e',
-                  ),
-                  Text(
-                    '${t.tr('revenue')}: ${carbonResult['revenue_thb_est']} ${t.tr('bahtUnit')}',
-                    style: const TextStyle(
-                      color: Colors.green,
-                      fontWeight: FontWeight.bold,
-                      fontSize: 16,
+      builder: (dialogCtx) => StatefulBuilder(
+        builder: (context, setDialogState) {
+          return AlertDialog(
+            title: Text(pond['plot_name'] ?? t.tr('plotDetail')),
+            content: SizedBox(
+              width: double.maxFinite,
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('${t.tr('typeLabel')}: $plotType'),
+                    Text('${t.tr('areaLabel')}: ${formatThaiArea(areaRai)}'),
+                    const SizedBox(height: 10),
+                    if (carbonResult != null) ...[
+                      const Divider(),
+                      Text(
+                        t.tr('carbonResult'),
+                        style: const TextStyle(fontWeight: FontWeight.bold),
+                      ),
+                      const SizedBox(height: 5),
+                      Text(
+                        '${t.tr('gasReduction')}: ${carbonResult['carbon_credit_ton']} tCO₂e',
+                      ),
+                      Text(
+                        '${t.tr('revenue')}: ${carbonResult['revenue_thb_est']} ${t.tr('bahtUnit')}',
+                        style: const TextStyle(
+                          color: Colors.green,
+                          fontWeight: FontWeight.bold,
+                          fontSize: 16,
+                        ),
+                      ),
+                    ] else
+                      Text(t.tr('carbonCalcFailed')),
+                    const SizedBox(height: 20),
+                    const Divider(),
+                    const SizedBox(height: 10),
+                    SizedBox(
+                      height: 350,
+                      child: NdviChartWidget(
+                        history: ndviHistory,
+                        onRetry: () async {
+                          // Show a small loader or just clear and fetch
+                          try {
+                            final ndviRaw = await _api.fetchNdviHistory(pond['id']);
+                            setDialogState(() {
+                              ndviHistory = ndviRaw
+                                  .map((e) => PlotNdviHistory.fromJson(e as Map<String, dynamic>))
+                                  .toList();
+                            });
+                          } catch (e) {
+                            debugPrint('Retry failed: $e');
+                          }
+                        },
+                      ),
                     ),
-                  ),
-                ] else
-                  Text(t.tr('carbonCalcFailed')),
-                const SizedBox(height: 20),
-                const Divider(),
-                const SizedBox(height: 10),
-                SizedBox(
-                  height: 350,
-                  child: NdviChartWidget(history: ndviHistory),
+                  ],
                 ),
-              ],
+              ),
             ),
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: Text(t.tr('close')),
-          ),
-        ],
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(dialogCtx),
+                child: Text(t.tr('close')),
+              ),
+            ],
+          );
+        },
       ),
     );
   }
@@ -531,13 +574,15 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
             onPressed: () async {
               if (nameController.text.isEmpty) return;
               Navigator.pop(context);
-
+              final center = _mapController.camera.center;
               final site = await _api.createSite(
                 name: nameController.text,
                 farmId: 'user-123',
                 province: provinceController.text.isNotEmpty
                     ? provinceController.text
-                    : null,
+                    : "Unknown",
+                latitude: _currentPosition?.latitude ?? center.latitude,
+                longitude: _currentPosition?.longitude ?? center.longitude,
               );
               if (site != null) {
                 _fetchSites();
@@ -732,11 +777,44 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
                 );
 
                 try {
+                  // AUTO-CREATE SITE if none exists or selected
+                  if (selectedSiteId == null) {
+                    // Calculate centroid for the site location
+                    double latSum = 0;
+                    double lngSum = 0;
+                    for (var p in _polygonPoints) {
+                      latSum += p.latitude;
+                      lngSum += p.longitude;
+                    }
+                    final centroidLat = latSum / _polygonPoints.length;
+                    final centroidLng = lngSum / _polygonPoints.length;
+
+                    final newSite = await _api.createSite(
+                      name: 'แปลงเกษตรของฉัน',
+                      farmId: 'user-123',
+                      province: 'ไทย',
+                      latitude: centroidLat,
+                      longitude: centroidLng,
+                    );
+
+                    if (newSite != null) {
+                      selectedSiteId = newSite['id'];
+                      await _fetchSites(); // Refresh site list in background
+                    } else {
+                      if (!formCtx.mounted) return;
+                      Navigator.pop(formCtx); // Close loading
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text('สร้าง Site อัตโนมัติไม่สำเร็จ กรุณาตรวจสอบการเชื่อมต่อ')),
+                      );
+                      return;
+                    }
+                  }
+
                   final savedPlot = await _api.createPlot(
                     farmId: 'user-123',
                     plotName: nameController.text,
                     plotType: plotType,
-                    siteId: selectedSiteId,
+                    siteId: selectedSiteId!,
                     coordinates: _polygonPoints
                         .map((p) => {"lat": p.latitude, "lng": p.longitude})
                         .toList(),
@@ -817,7 +895,7 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
                     setState(() => _polygonPoints.clear());
                     // Reload ponds for active site
                     if (_activeSite != null) {
-                      _selectSite(_activeSite!);
+                      _selectSite(_activeSite!, moveCamera: false);
                     }
                     _fetchSites();
                   }
@@ -1006,33 +1084,47 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
             title: Text(t.tr('configServer')),
             onTap: _showConfigServerDialog,
           ),
-          const Divider(height: 1),
-          SwitchListTile(
-            title: const Text('Admin Mode (Mock)'),
-            subtitle: const Text('Enable Sentinel Maps'),
-            value: _isAdmin,
-            onChanged: (bool value) async {
-              final prefs = await SharedPreferences.getInstance();
-              await prefs.setBool('is_admin', value);
-              setState(() {
-                _isAdmin = value;
-                if (!value) {
-                  _selectedLayerType = null;
-                  _selectedLayerBaseUrl = null;
-                  _selectedMapDate = null;
-                }
-              });
-            },
-            secondary: const Icon(Icons.admin_panel_settings),
-          ),
         ],
       ),
     );
   }
 
   Widget _buildSitesList(AppLocalizations t) {
+    if (_hasConnectionError) {
+      return Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text('เซิร์ฟเวอร์ตอบสนองผิดพลาด\nโปรดตรวจสอบ IP'),
+            const SizedBox(height: 12),
+            ElevatedButton.icon(
+              onPressed: _fetchSites,
+              icon: const Icon(Icons.refresh),
+              label: const Text('ลองเชื่อมต่อใหม่'),
+            ),
+          ],
+        ),
+      );
+    }
+
     if (_sites.isEmpty) {
-      return Center(child: Text(t.tr('noSites')));
+      return Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(t.tr('noSites')),
+            const SizedBox(height: 12),
+            ElevatedButton.icon(
+              onPressed: () {
+                Navigator.pop(context); // Close Drawer
+                _showCreateSiteDialog();
+              },
+              icon: const Icon(Icons.add),
+              label: Text(t.tr('createSite')),
+            ),
+          ],
+        ),
+      );
     }
 
     final query = _searchQuery.toLowerCase();
@@ -1236,7 +1328,41 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
             top: 12,
             left: 12,
             child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
+                // ─── Add Plot Hint ────────────────────────
+                if (_sitePonds.isEmpty && _polygonPoints.isEmpty && !_isLoadingPonds)
+                  Container(
+                    margin: const EdgeInsets.only(bottom: 8),
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    decoration: BoxDecoration(
+                      color: Colors.white.withValues(alpha: 0.9),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: Colors.green),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withValues(alpha: 0.1),
+                          blurRadius: 4,
+                          offset: const Offset(0, 2),
+                        ),
+                      ],
+                    ),
+                    child: const Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.touch_app, color: Colors.green, size: 20),
+                        SizedBox(width: 8),
+                        Text(
+                          'แตะบนแผนที่เพื่อเริ่มวาดแปลง',
+                          style: TextStyle(
+                            color: Colors.green,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 13,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
                 FloatingActionButton.small(
                   heroTag: 'north',
                   onPressed: _animateRotateToNorth,
@@ -1253,16 +1379,24 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
                   child: const Icon(Icons.my_location),
                 ),
                 const SizedBox(height: 8),
-                if (_availableMapDates.isNotEmpty && _isAdmin)
-                  FloatingActionButton.small(
-                    heroTag: 'layers',
-                    onPressed: _showMapLayersDialog,
-                    backgroundColor: _selectedLayerBaseUrl != null
-                        ? Colors.blue.shade100
-                        : Colors.white,
-                    foregroundColor: Colors.blue.shade800,
-                    child: const Icon(Icons.layers),
-                  ),
+                FloatingActionButton.small(
+                  heroTag: 'layers',
+                  onPressed: () {
+                    if (_sitePonds.isEmpty) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text('กรุณาสร้างแปลง หรือเลือกแปลงก่อน เพื่อดึงข้อมูลแผนที่ดาวเทียม')),
+                      );
+                      return;
+                    }
+                    _showMapLayersDialog();
+                  },
+                  backgroundColor: _selectedLayerBaseUrl != null
+                      ? Colors.blue.shade100
+                      : Colors.white,
+                  foregroundColor: Colors.blue.shade800,
+                  tooltip: 'แผนที่ดาวเทียม (Sentinel-2)',
+                  child: const Icon(Icons.layers),
+                ),
               ],
             ),
           ),
@@ -1377,7 +1511,8 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
 
   Future<void> _showConfigServerDialog() async {
     final t = AppLocalizations.of(context);
-    final TextEditingController ipController = TextEditingController();
+    final currentIp = _api.baseUrl.replaceAll('http://', '').replaceAll(':3000', '');
+    final TextEditingController ipController = TextEditingController(text: currentIp);
 
     await showDialog(
       context: context,
@@ -1433,19 +1568,77 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
     );
   }
 
-  // ─── AI Map Layers Dialog ────────────────────────────────
   Future<void> _showMapLayersDialog() async {
+    // Auto-select first plot if none selected
+    if (_activePlotId == null && _sitePonds.isNotEmpty) {
+      _activePlotId = _sitePonds.first['id'] as String;
+      final dates = await _api.fetchMapDates(_activePlotId!);
+      if (mounted) setState(() => _availableMapDates = dates);
+    }
+
+    // Auto-select latest date if not set
+    if (_selectedMapDate == null && _availableMapDates.isNotEmpty) {
+      _selectedMapDate = _availableMapDates.first.toString();
+      _selectedLayerType = 'RGB';
+      // Fetch layers for this auto-selected date
+      if (_activePlotId != null) {
+        final layers = await _api.fetchMapLayers(_activePlotId!, _selectedMapDate!);
+        if (mounted) setState(() => _availableLayers = layers);
+      }
+    }
+    
+    // Auto-select Base URL based on selected layer type
+    if (_selectedLayerType != null && _availableLayers.isNotEmpty) {
+      final layer = _availableLayers.firstWhere(
+        (l) => l['layerType'] == _selectedLayerType,
+        orElse: () => null,
+      );
+      if (layer != null) _selectedLayerBaseUrl = layer['baseUrl'];
+    }
+
     await showDialog(
       context: context,
       builder: (context) {
         return StatefulBuilder(
           builder: (context, setModalState) {
             return AlertDialog(
-              title: const Text('เลือกช่วงเวลาแผนที่'), // To be localized
+              title: const Text('ดาวเทียม Sentinel-2'),
               content: Column(
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
+                  const Text('เลือกแปลงเกษตร:'),
+                  DropdownButton<String>(
+                    isExpanded: true,
+                    value: _activePlotId,
+                    hint: const Text('เลือกแปลง'),
+                    items: _sitePonds.map<DropdownMenuItem<String>>((pond) {
+                      return DropdownMenuItem<String>(
+                        value: pond['id'] as String,
+                        child: Text(pond['plot_name'] ?? 'แปลงไม่มีชื่อ'),
+                      );
+                    }).toList(),
+                    onChanged: (value) async {
+                      if (value == null || value == _activePlotId) return;
+                      
+                      setModalState(() {
+                        _activePlotId = value;
+                        _availableMapDates = [];
+                        _selectedMapDate = null;
+                        _availableLayers = [];
+                        _selectedLayerType = null;
+                        _selectedLayerBaseUrl = null;
+                      });
+
+                      // Fetch dates for newly selected plot
+                      final dates = await _api.fetchMapDates(value);
+                      if (mounted) {
+                        setState(() => _availableMapDates = dates); // Main UI state
+                        setModalState(() => _availableMapDates = dates); // Dialog state
+                      }
+                    },
+                  ),
+                  const SizedBox(height: 16),
                   const Text('วันที่อัปเดตแผนที่ดาวเทียม:'),
                   DropdownButton<String>(
                     isExpanded: true,
@@ -1465,8 +1658,8 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
                         _selectedLayerType = null;
                         _selectedLayerBaseUrl = null;
                       });
-                      if (value != null && _sitePonds.isNotEmpty) {
-                        final plotId = _sitePonds.first['id'] as String;
+                      if (value != null && _activePlotId != null) {
+                        final plotId = _activePlotId!;
                         final layers = await _api.fetchMapLayers(plotId, value);
                         if (mounted) {
                           setModalState(() => _availableLayers = layers);

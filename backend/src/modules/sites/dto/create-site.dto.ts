@@ -1,4 +1,4 @@
-import { IsString, IsNotEmpty, IsNumber, IsOptional } from 'class-validator';
+import { IsString, IsNotEmpty, IsNumber } from 'class-validator';
 
 export class CreateSiteDto {
   @IsString()
@@ -6,16 +6,14 @@ export class CreateSiteDto {
   name: string;
 
   @IsString()
-  @IsOptional()
-  province?: string;
+  @IsNotEmpty()
+  province: string;
 
   @IsNumber()
-  @IsOptional()
-  latitude?: number;
+  latitude: number;
 
   @IsNumber()
-  @IsOptional()
-  longitude?: number;
+  longitude: number;
 
   @IsString()
   @IsNotEmpty()

@@ -5,8 +5,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 class ApiService {
   final Dio _dio = Dio(
     BaseOptions(
-      connectTimeout: const Duration(seconds: 5),
-      receiveTimeout: const Duration(seconds: 10),
+      connectTimeout: const Duration(seconds: 10),
+      receiveTimeout: const Duration(seconds: 45),
     ),
   )..interceptors.add(LogInterceptor(responseBody: true, requestBody: true));
 
@@ -52,6 +52,7 @@ class ApiService {
       }
     } catch (e) {
       debugPrint('Error fetching sites: $e');
+      rethrow;
     }
     return [];
   }
@@ -70,9 +71,9 @@ class ApiService {
         data: {
           "name": name,
           "farmId": farmId,
-          if (province != null) "province": province,
-          if (latitude != null) "latitude": latitude,
-          if (longitude != null) "longitude": longitude,
+          "province": province ?? "Unknown",
+          "latitude": latitude ?? 0.0,
+          "longitude": longitude ?? 0.0,
         },
       );
       if (response.statusCode == 201) {
@@ -108,6 +109,7 @@ class ApiService {
       }
     } catch (e) {
       debugPrint('Error fetching plots by site: $e');
+      rethrow;
     }
     return [];
   }

@@ -13,6 +13,7 @@ interface CopernicusTokenResponse {
 interface CatalogFeature {
   properties?: {
     datetime?: string;
+    'eo:cloud_cover'?: number;
   };
 }
 
@@ -32,7 +33,7 @@ interface StatisticalInterval {
     from?: string;
   };
   outputs?: {
-    default?: {
+    [key: string]: {
       bands?: {
         B0?: {
           stats?: NdviBandStats;
@@ -168,10 +169,14 @@ export class CopernicusService {
         ),
       );
 
-      // Extract unique dates from features
+      // Extract unique dates from features, strictly < 15% cloud cover
       const datesSet = new Set<string>();
       if (data.features && data.features.length > 0) {
-        data.features.forEach((feature: CatalogFeature) => {
+        const strictFeatures = data.features.filter(
+          (f) => (f.properties?.['eo:cloud_cover'] ?? 100) < 15,
+        );
+
+        strictFeatures.forEach((feature: CatalogFeature) => {
           if (feature.properties?.datetime) {
             datesSet.add(feature.properties.datetime);
           }
@@ -181,8 +186,19 @@ export class CopernicusService {
       return Array.from(datesSet).sort((a, b) => b.localeCompare(a));
     } catch (error: unknown) {
       const errMsg = error instanceof Error ? error.message : 'Unknown error';
-      this.logger.error('Failed to fetch available dates', errMsg);
-      return [];
+      let details = '';
+      /* eslint-disable-next-line @typescript-eslint/no-unsafe-member-access */
+      if ((error as any).response?.data) {
+        /* eslint-disable-next-line @typescript-eslint/no-unsafe-member-access */
+        details = JSON.stringify((error as any).response?.data || {});
+      }
+      this.logger.error(
+        `Failed to fetch available dates: ${errMsg} ${details}`,
+      );
+      throw new HttpException(
+        `Catalog Error: ${errMsg} ${details}`,
+        HttpStatus.BAD_GATEWAY,
+      );
     }
   }
 
@@ -328,9 +344,10 @@ function evaluatePixel(sample) {
 //VERSION=3
 function setup() {
   return {
-    input: ["B04", "B08", "dataMask"],
+    input: ["B04", "B08", "CLP", "dataMask"],
     output: [
       { id: "default", bands: 1 },
+      { id: "cloud", bands: 1 },
       { id: "dataMask", bands: 1 }
     ]
   };
@@ -339,6 +356,7 @@ function evaluatePixel(sample) {
   let ndvi = (sample.B08 - sample.B04) / (sample.B08 + sample.B04);
   return {
     default: [ndvi],
+    cloud: [sample.CLP],
     dataMask: [sample.dataMask]
   };
 }`;
@@ -396,6 +414,7 @@ function evaluatePixel(sample) {
       if (data?.data) {
         for (const interval of data.data) {
           const bandStats = interval.outputs?.default?.bands?.B0?.stats;
+          const cloudStats = interval.outputs?.cloud?.bands?.B0?.stats;
           const dateFrom = interval.interval?.from;
 
           if (bandStats && dateFrom && bandStats.sampleCount > 0) {
@@ -404,7 +423,7 @@ function evaluatePixel(sample) {
               mean: bandStats.mean,
               max: bandStats.max,
               min: bandStats.min,
-              cloudCover: null,
+              cloudCover: cloudStats ? cloudStats.mean : 0.0,
             });
           }
         }
