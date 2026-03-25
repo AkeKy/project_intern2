@@ -254,9 +254,9 @@ export class PlotsService {
   private smoothNdviHistory(records: NdviHistoryRecord[]): NdviHistoryRecord[] {
     if (records.length === 0) return records;
 
-    // 1. Strict Filtering: Only keep data with < 15% cloud probability.
-    // If no images match this, we return an empty list as requested by the user.
-    const base = records.filter((r) => (r.cloudCover ?? 0) < 15);
+    // 1. Strict Filtering: Only keep data with < 15% cloudy pixels.
+    // Cloud cover is now a ratio (0.0 = clear, 1.0 = fully cloudy) from SCL-based detection.
+    const base = records.filter((r) => (r.cloudCover ?? 0) < 0.15);
 
     if (base.length < 3) return base;
 
@@ -296,9 +296,9 @@ export class PlotsService {
     const isMissingHistory =
       earliestCachedDate.getTime() > startDate.getTime() + ONE_DAY_MS;
 
-    const latestCachedInsert = cachedHistory[cachedHistory.length - 1].createdAt;
-    const isOutdated =
-      Date.now() - latestCachedInsert.getTime() > ONE_DAY_MS;
+    const latestCachedInsert =
+      cachedHistory[cachedHistory.length - 1].createdAt;
+    const isOutdated = Date.now() - latestCachedInsert.getTime() > ONE_DAY_MS;
 
     // Fetch if cache is missing history OR if current cycle is still active and cache is old
     const needsFreshUpdate =

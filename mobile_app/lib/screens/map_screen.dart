@@ -1572,6 +1572,10 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
     // Auto-select first plot if none selected
     if (_activePlotId == null && _sitePonds.isNotEmpty) {
       _activePlotId = _sitePonds.first['id'] as String;
+    }
+
+    // Always re-fetch dates for the current active plot to ensure dialog is fresh
+    if (_activePlotId != null) {
       final dates = await _api.fetchMapDates(_activePlotId!);
       if (mounted) setState(() => _availableMapDates = dates);
     }
@@ -1607,38 +1611,47 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text('เลือกแปลงเกษตร:'),
-                  DropdownButton<String>(
-                    isExpanded: true,
-                    value: _activePlotId,
-                    hint: const Text('เลือกแปลง'),
-                    items: _sitePonds.map<DropdownMenuItem<String>>((pond) {
-                      return DropdownMenuItem<String>(
-                        value: pond['id'] as String,
-                        child: Text(pond['plot_name'] ?? 'แปลงไม่มีชื่อ'),
-                      );
-                    }).toList(),
-                    onChanged: (value) async {
-                      if (value == null || value == _activePlotId) return;
-                      
-                      setModalState(() {
-                        _activePlotId = value;
-                        _availableMapDates = [];
-                        _selectedMapDate = null;
-                        _availableLayers = [];
-                        _selectedLayerType = null;
-                        _selectedLayerBaseUrl = null;
-                      });
+                  // Plot context - Simplify if already active
+                  if (_activePlotId != null) ...[
+                    Text(
+                      'แปลง: ${_sitePonds.firstWhere((p) => p['id'] == _activePlotId, orElse: () => {'plot_name': 'Unknown'})['plot_name']}',
+                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+                    ),
+                    const SizedBox(height: 12),
+                  ] else ...[
+                    const Text('เลือกแปลงเกษตร:'),
+                    DropdownButton<String>(
+                      isExpanded: true,
+                      value: _activePlotId,
+                      hint: const Text('เลือกแปลง'),
+                      items: _sitePonds.map<DropdownMenuItem<String>>((pond) {
+                        return DropdownMenuItem<String>(
+                          value: pond['id'] as String,
+                          child: Text(pond['plot_name'] ?? 'แปลงไม่มีชื่อ'),
+                        );
+                      }).toList(),
+                      onChanged: (value) async {
+                        if (value == null || value == _activePlotId) return;
+                        
+                        setModalState(() {
+                          _activePlotId = value;
+                          _availableMapDates = [];
+                          _selectedMapDate = null;
+                          _availableLayers = [];
+                          _selectedLayerType = null;
+                          _selectedLayerBaseUrl = null;
+                        });
 
-                      // Fetch dates for newly selected plot
-                      final dates = await _api.fetchMapDates(value);
-                      if (mounted) {
-                        setState(() => _availableMapDates = dates); // Main UI state
-                        setModalState(() => _availableMapDates = dates); // Dialog state
-                      }
-                    },
-                  ),
-                  const SizedBox(height: 16),
+                        // Fetch dates for newly selected plot
+                        final dates = await _api.fetchMapDates(value);
+                        if (mounted) {
+                          setState(() => _availableMapDates = dates); // Main UI state
+                          setModalState(() => _availableMapDates = dates); // Dialog state
+                        }
+                      },
+                    ),
+                    const SizedBox(height: 16),
+                  ],
                   const Text('วันที่อัปเดตแผนที่ดาวเทียม:'),
                   DropdownButton<String>(
                     isExpanded: true,
@@ -1657,6 +1670,7 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
                         _selectedMapDate = value;
                         _selectedLayerType = null;
                         _selectedLayerBaseUrl = null;
+                        _availableLayers = [];
                       });
                       if (value != null && _activePlotId != null) {
                         final plotId = _activePlotId!;

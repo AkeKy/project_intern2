@@ -344,7 +344,7 @@ function evaluatePixel(sample) {
 //VERSION=3
 function setup() {
   return {
-    input: ["B04", "B08", "CLP", "dataMask"],
+    input: ["B04", "B08", "SCL", "dataMask"],
     output: [
       { id: "default", bands: 1 },
       { id: "cloud", bands: 1 },
@@ -354,9 +354,11 @@ function setup() {
 }
 function evaluatePixel(sample) {
   let ndvi = (sample.B08 - sample.B04) / (sample.B08 + sample.B04);
+  // SCL cloud classification: 3=shadow, 8=cloud_medium, 9=cloud_high, 10=cirrus
+  let isCloud = (sample.SCL === 3 || sample.SCL === 8 || sample.SCL === 9 || sample.SCL === 10) ? 1.0 : 0.0;
   return {
     default: [ndvi],
-    cloud: [sample.CLP],
+    cloud: [isCloud],
     dataMask: [sample.dataMask]
   };
 }`;
@@ -393,6 +395,10 @@ function evaluatePixel(sample) {
         },
       },
     };
+
+    this.logger.debug(
+      `Payload for getNdviStatistics: ${JSON.stringify(payload)}`,
+    );
 
     try {
       const { data } = await firstValueFrom(
@@ -431,10 +437,15 @@ function evaluatePixel(sample) {
 
       return stats;
     } catch (error: unknown) {
+      let details = '';
+      /* eslint-disable-next-line @typescript-eslint/no-unsafe-member-access */
+      if ((error as any).response?.data) {
+        /* eslint-disable-next-line @typescript-eslint/no-unsafe-member-access */
+        details = JSON.stringify((error as any).response?.data || {});
+      }
       const errMsg = error instanceof Error ? error.message : 'Unknown error';
       this.logger.error(
-        'Failed to fetch NDVI statistics from Copernicus',
-        errMsg,
+        `Failed to fetch NDVI statistics from Copernicus: ${errMsg} - Details: ${details}`,
       );
       throw new HttpException(
         'Failed to fetch NDVI historical data',
